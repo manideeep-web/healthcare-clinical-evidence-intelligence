@@ -2,6 +2,7 @@ class ClinicalPolicyRetriever:
     """
     Simulates a Vector DB (e.g., ChromaDB) retrieval system for medical policies.
     """
+
     def __init__(self):
         self.mock_vector_store = {
             "Osteoarthritis": (
