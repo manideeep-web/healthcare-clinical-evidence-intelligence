@@ -1,34 +1,38 @@
-# Healthcare Clinical Evidence & Prior Authorization Intelligence
+# Healthcare Prior Authorization Intelligence Platform (OpenMed)
 
-Hey there! Welcome to the repository for my healthcare AI decision-support prototype. 
+Ever dealt with the absolute headache of medical prior authorizations? Doctors spend hours digging through dense payer guidelines, and patients wait weeks for approvals. 
 
-If you've ever looked at how clinical prior authorizations are handled, you know it's often a painfully manual, slow process bogged down by unstructured notes and complex payer guidelines. This project is a hands-on exploration of how modern AI—specifically combining clinical NLP, Retrieval-Augmented Generation (RAG), and risk-scoring models—can streamline that workflow.
-
----
-
-## What This App Does
-
-Instead of forcing reviewers to dig through endless documentation, this tool automates the heavy lifting:
-* **Flexible Document Intake:** Paste clinical provider notes directly or drag and drop actual PDF medical records.
-* **Clinical Entity Extraction:** Automatically parses out key details like diagnoses (e.g., osteoarthritis), treatment histories (e.g., physical therapy), and requested surgical procedures.
-* **Policy Grounding (RAG):** Matches patient conditions against clinical guidelines and payer policy requirements.
-* **Automated Risk Routing:** Computes a transparent complexity score (0–100) and routes the case into the right review bucket—whether it's auto-approval, nurse review, or medical director escalation.
+I built **OpenMed** to change that. It’s an AI-powered decision support prototype designed to instantly read clinical notes (or full medical PDF charts), check them against real-world insurance policies, predict approval risk, and package everything into industry-standard healthcare formats.
 
 ---
 
-## Check It Out Live
-You can test the interactive Streamlit dashboard right in your browser:
-👉 **[Open Live App](https://your-streamlit-app-url.streamlit.app)** *(Make sure to update this with your actual deployed URL)*
+## What It Can Do
+
+* ** Drop-in PDF & Text Support:** Paste doctor notes or drag-and-drop actual patient medical records—the app extracts the text automatically.
+* ** Smart Clinical Parsing:** Uses a robust local extractor out-of-the-box, with optional plug-and-play support for high-speed LLMs (like OpenAI or Groq) to pull out diagnoses, treatments, and requested procedures.
+* ** Multi-Policy RAG:** Cross-references clinical notes against real guidelines from major payers (Humana, Aetna, UnitedHealthcare) across specialties like orthopedics, cardiology, and spine care.
+* ** Intelligent Risk Scoring:** Analyzes conservative treatment timelines to score the case complexity and route it appropriately (*Auto-Approve*, *Nurse Review*, or *Medical Director Review*).
+* ** HL7 FHIR Interoperability:** Instantly packages the decision into a standard HL7 FHIR JSON bundle (`Claim` and `RiskAssessment` resources) for seamless EHR integration.
+* ** Compliance & Audit Logging:** Tracks every evaluation made during your session and lets compliance officers export a full CSV audit report.
+* ** Container Ready:** Fully packaged with a clean Dockerfile so it can be spun up anywhere in seconds.
 
 ---
 
-## 📂 Repository Structure
-```text
-healthcare-clinical-evidence-intelligence/
-├── healthcare_ai/
-│   ├── app.py                 # The interactive Streamlit dashboard
-│   ├── nlp/                   # Clinical NLP extraction modules
-│   ├── rag/                   # Policy retrieval and vector search logic
-│   └── models/                # Risk scoring and decision routing models
-├── openmed/                   # Core clinical framework & grounding tools
-└── README.md                  # Project overview
+## Tech Stack
+* **Python 3.10+**
+* **Streamlit** (for a fast, clean UI dashboard)
+* **PyPDF** (for document text extraction)
+* **OpenAI SDK / Groq API** (for generative LLM extraction)
+* **Pandas & JSON** (for data handling and audit trails)
+* **HL7 FHIR & Docker**
+
+---
+
+## Getting Started Locally
+
+Want to run it on your own machine? It takes less than a minute:
+
+1. **Clone the repo:**
+   ```bash
+   git clone [https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git)
+   cd YOUR_REPOSITORY
