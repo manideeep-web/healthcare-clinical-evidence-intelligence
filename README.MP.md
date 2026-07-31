@@ -1,5 +1,7 @@
 # Healthcare Prior Authorization Intelligence Platform (OpenMed)
 
+[![Models](https://img.shields.io/badge/%F0%9F%A4%97%20Models-2%2C000+-F5E27A?style=for-the-badge&labelColor=0E1116)](https://huggingface.co/OpenMed)
+
 Ever dealt with the absolute headache of medical prior authorizations? Doctors spend hours digging through dense payer guidelines, and patients wait weeks for approvals. 
 
 I built **OpenMed** to change that. It’s an AI-powered decision support prototype designed to instantly read clinical notes (or full medical PDF charts), check them against real-world insurance policies, predict approval risk, and package everything into industry-standard healthcare formats.
