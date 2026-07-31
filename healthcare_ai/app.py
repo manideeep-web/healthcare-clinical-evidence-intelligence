@@ -1,6 +1,7 @@
 import streamlit as st
 from typing import Dict, Any
-import io
+import json
+import datetime
 
 try:
     import pypdf
@@ -8,72 +9,103 @@ try:
 except ImportError:
     HAS_PYPDF = False
 
-# --- 1. NLP Entity Extractor ---
-class ClinicalEntityExtractor:
-    def __init__(self):
-        self.model_loaded = True 
-        
-    def extract(self, text: str) -> Dict[str, str]:
-        text_lower = text.lower()
-        entities = {
-            "diagnosis": "General Medical Review",
-            "treatment_history": "None documented",
-            "procedure_request": "Standard Evaluation"
-        }
-        if "osteoarthritis" in text_lower or "joint degeneration" in text_lower or "knee" in text_lower:
-            entities["diagnosis"] = "Osteoarthritis / Knee Degeneration"
-            entities["procedure_request"] = "Total Knee Arthroplasty"
-        elif "chest pain" in text_lower or "coronary" in text_lower or "myocardial" in text_lower:
-            entities["diagnosis"] = "Coronary Artery Disease"
-            entities["procedure_request"] = "Diagnostic Cardiac Catheterization"
-        elif "back pain" in text_lower or "lumbar" in text_lower or "spine" in text_lower:
-            entities["diagnosis"] = "Lumbar Spinal Stenosis"
-            entities["procedure_request"] = "Lumbar MRI / Spinal Fusion"
+try:
+    from openai import OpenAI
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
 
-        if "physical therapy" in text_lower or "pt" in text_lower or "conservative therapy" in text_lower or "medication" in text_lower:
-            entities["treatment_history"] = "Documented Conservative Management"
-            
-        return entities
+# --- 1. LLM-Powered Clinical Entity Extractor ---
+class LLMClinicalExtractor:
+    def __init__(self, api_key: str, base_url: str = None, model_name: str = "gpt-4o-mini"):
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model_name = model_name
+
+    def extract(self, text: str) -> Dict[str, str]:
+        if not self.api_key or not HAS_OPENAI:
+            # Fallback rule-based extraction if no API key is provided
+            text_lower = text.lower()
+            entities = {
+                "diagnosis": "General Medical Review",
+                "treatment_history": "None documented",
+                "procedure_request": "Standard Evaluation"
+            }
+            if "osteoarthritis" in text_lower or "knee" in text_lower:
+                entities["diagnosis"] = "Osteoarthritis / Knee Degeneration"
+                entities["procedure_request"] = "Total Knee Arthroplasty"
+            elif "chest pain" in text_lower or "coronary" in text_lower:
+                entities["diagnosis"] = "Coronary Artery Disease"
+                entities["procedure_request"] = "Diagnostic Cardiac Catheterization"
+            elif "back pain" in text_lower or "spine" in text_lower:
+                entities["diagnosis"] = "Lumbar Spinal Stenosis"
+                entities["procedure_request"] = "Lumbar Spinal Fusion"
+            if "therapy" in text_lower or "conservative" in text_lower:
+                entities["treatment_history"] = "Documented Conservative Management"
+            return entities
+
+        try:
+            client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            prompt = f"""
+            Analyze the following clinical provider note and extract three fields in valid JSON format:
+            1. "diagnosis": The primary medical condition or diagnosis.
+            2. "treatment_history": Prior conservative treatments or therapies attempted (e.g., physical therapy, medications).
+            3. "procedure_request": The specific medical procedure or test being requested for authorization.
+
+            Clinical Note:
+            {text}
+
+            Return ONLY valid JSON with keys: diagnosis, treatment_history, procedure_request.
+            """
+            response = client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            return {
+                "diagnosis": f"Extraction Error: {str(e)}",
+                "treatment_history": "Unknown",
+                "procedure_request": "Unknown"
+            }
 
 # --- 2. Advanced Multi-Policy RAG Retriever ---
 class ClinicalPolicyRetriever:
     def __init__(self):
-        # Expanded enterprise policy knowledge base
         self.policy_database = {
-            "Osteoarthritis / Knee Degeneration": (
+            "Osteoarthritis": (
                 "Humana Policy Guideline 402.1 (Orthopedics): Total Knee Arthroplasty requires "
                 "documented failure of conservative therapy, including at least 6 weeks of physical "
                 "therapy, structured weight management, and NSAID usage prior to authorization."
             ),
             "Coronary Artery Disease": (
                 "Aetna Clinical Policy Bulletin 0122 (Cardiology): Diagnostic Cardiac Catheterization "
-                "is medically necessary for patients presenting with objective evidence of myocardial ischemia "
-                "or high-risk features on non-invasive stress testing."
+                "is medically necessary for patients presenting with objective evidence of myocardial ischemia."
             ),
             "Lumbar Spinal Stenosis": (
                 "UnitedHealthcare Commercial Policy 2024.R4 (Spine): Lumbar MRI or surgical intervention "
-                "requires a minimum of 12 weeks of conservative care (physical therapy/epidural steroid injections) "
-                "and documented progressive neurological deficit."
+                "requires a minimum of 12 weeks of conservative care and progressive neurological deficit."
             )
         }
 
     def search_policies(self, diagnosis: str) -> str:
-        # Fuzzy match or direct lookup against our enterprise guideline database
         for key, policy_text in self.policy_database.items():
-            if key.lower() in diagnosis.lower() or diagnosis.lower() in key.lower():
+            if key.lower() in diagnosis.lower():
                 return policy_text
-        return (
-            "General Payer Guideline: Standard medical necessity review required. "
-            "Ensure all clinical notes include objective diagnostic findings and prior treatment timelines."
-        )
+        return "General Payer Guideline: Standard medical necessity review required."
 
 # --- 3. Authorization Risk Model ---
 class AuthorizationRiskModel:
     def predict_risk(self, clinical_entities: Dict[str, str]) -> Dict[str, Any]:
         risk_score = 20  
-        if clinical_entities.get("treatment_history") != "None documented":
+        history = clinical_entities.get("treatment_history", "").lower()
+        procedure = clinical_entities.get("procedure_request", "").lower()
+        
+        if history != "none documented" and history != "unknown" and len(history) > 3:
             risk_score += 30 
-        if "Arthroplasty" in clinical_entities.get("procedure_request", "") or "Fusion" in clinical_entities.get("procedure_request", ""):
+        if "arthroplasty" in procedure or "fusion" in procedure or "catheterization" in procedure:
             risk_score += 40
             
         if risk_score >= 80:
@@ -102,13 +134,60 @@ def extract_text_from_pdf(uploaded_file) -> str:
     except Exception as e:
         return f"Error reading PDF: {str(e)}"
 
-# --- 4. Streamlit UI Dashboard ---
+# --- 4. HL7 FHIR Exporter Utility ---
+def generate_fhir_bundle(entities: dict, prediction: dict, policy: str) -> dict:
+    return {
+        "resourceType": "Bundle",
+        "type": "collection",
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Claim",
+                    "status": "active",
+                    "use": "preauthorization",
+                    "diagnosis": [{"diagnosisString": entities.get("diagnosis")}],
+                    "procedure": [{"procedureString": entities.get("procedure_request")}],
+                    "supportingInfo": [{"category": "Treatment History", "code": entities.get("treatment_history")}]
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "RiskAssessment",
+                    "status": "final",
+                    "prediction": [{
+                        "outcome": {"text": prediction.get("review_tier")},
+                        "probabilityDecimal": prediction.get("risk_score") / 100.0
+                    }],
+                    "basis": policy
+                }
+            }
+        ]
+    }
+
+# --- 5. Streamlit UI Dashboard ---
 def main():
     st.set_page_config(page_title="Clinical Evidence AI", layout="wide")
     st.title("Healthcare Prior Authorization Intelligence")
-    st.markdown("Enterprise AI decision support powered by multi-domain RAG retrieval and risk analytics.")
+    st.markdown("Enterprise AI decision support powered by Generative LLM extraction, multi-domain RAG, and FHIR interoperability.")
 
-    nlp = ClinicalEntityExtractor()
+    # Sidebar configuration for LLM
+    st.sidebar.header("AI Provider Configuration")
+    provider = st.sidebar.selectbox("Select LLM Provider", ["Fallback (Rule-Based)", "OpenAI", "Groq (Fast & Free Tier)"])
+    
+    api_key = ""
+    model_name = "gpt-4o-mini"
+    base_url = None
+
+    if provider == "OpenAI":
+        api_key = st.sidebar.text_input("Enter OpenAI API Key", type="password")
+        model_name = st.sidebar.selectbox("Model", ["gpt-4o-mini", "gpt-4o"])
+    elif provider == "Groq (Fast & Free Tier)":
+        api_key = st.sidebar.text_input("Enter Groq API Key", type="password", help="Get a free key from console.groq.com")
+        base_url = "https://api.groq.com/openai/v1"
+        model_name = st.sidebar.selectbox("Model", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"])
+
+    nlp = LLMClinicalExtractor(api_key=api_key, base_url=base_url, model_name=model_name)
     rag = ClinicalPolicyRetriever()
     ml = AuthorizationRiskModel()
 
@@ -132,7 +211,7 @@ def main():
         if not clinical_note.strip():
             st.warning("Please provide or upload a clinical note before running analysis.")
         else:
-            with st.spinner("Analyzing clinical evidence across multi-payer policy libraries..."):
+            with st.spinner("Running LLM entity extraction, policy grounding, and FHIR mapping..."):
                 entities = nlp.extract(clinical_note)
                 policy = rag.search_policies(entities["diagnosis"])
                 prediction = ml.predict_risk(entities)
@@ -140,9 +219,8 @@ def main():
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    st.subheader("Extracted Clinical Entities")
+                    st.subheader("Extracted Clinical Entities (LLM)")
                     st.json(entities)
-                    
                     st.info(f"**Matched Payer Policy (RAG Retrieval):**\n\n{policy}")
 
                 with col2:
@@ -158,8 +236,19 @@ def main():
                         st.warning(f"Routing: {tier}")
                     else:
                         st.success(f"Routing: {tier}")
-                        
-                st.success("Multi-Domain Analysis Completed Successfully")
+                
+                st.markdown("---")
+                st.subheader("Standardized Healthcare Interoperability (HL7 FHIR)")
+                fhir_bundle = generate_fhir_bundle(entities, prediction, policy)
+                
+                st.download_button(
+                    label="📥 Download Decision as HL7 FHIR Bundle (JSON)",
+                    data=json.dumps(fhir_bundle, indent=2),
+                    file_name="prior_auth_fhir_bundle.json",
+                    mime="application/json"
+                )
+                
+                st.success("LLM-Powered Analysis Completed Successfully")
 
 if __name__ == "__main__":
     main()
