@@ -227,7 +227,7 @@ jobs:
 
       - name: Generate SLSA provenance for image
         id: attest-image
-        uses: actions/attest@v4
+        uses: actions/attest@v4.2.0
         with:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
