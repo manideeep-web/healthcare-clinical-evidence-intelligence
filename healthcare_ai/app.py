@@ -21,16 +21,40 @@ except ImportError:
 
 
 # --- 1. LLM / Fallback Clinical Entity Extractor ---
+class ExtractionError(ValueError):
+    """Signal that extraction cannot safely support authorization processing."""
+
+
+def validate_clinical_entities(entities: Any) -> Dict[str, str]:
+    """Validate required extraction fields without exposing response contents."""
+    required_fields = ("diagnosis", "treatment_history", "procedure_request")
+    if not isinstance(entities, dict) or any(
+        not isinstance(entities.get(field), str) or not entities[field].strip()
+        for field in required_fields
+    ):
+        raise ExtractionError("Clinical extraction returned invalid required fields.")
+    return {field: entities[field] for field in required_fields}
+
+
 class LLMClinicalExtractor:
     def __init__(
-        self, api_key: str, base_url: str = None, model_name: str = "gpt-4o-mini"
+        self,
+        api_key: str,
+        base_url: str = None,
+        model_name: str = "gpt-4o-mini",
+        require_provider: bool = False,
     ):
         self.api_key = api_key
         self.base_url = base_url
         self.model_name = model_name
+        self.require_provider = require_provider
 
     def extract(self, text: str) -> Dict[str, str]:
-        if not self.api_key or not HAS_OPENAI:
+        if self.require_provider and not self.api_key:
+            raise ExtractionError("The selected provider requires an API key.")
+        if self.api_key and not HAS_OPENAI:
+            raise ExtractionError("The selected provider is unavailable.")
+        if not self.api_key:
             text_lower = text.lower()
             entities = {
                 "diagnosis": "General Medical Review",
@@ -48,7 +72,7 @@ class LLMClinicalExtractor:
                 entities["procedure_request"] = "Lumbar Spinal Fusion"
             if "therapy" in text_lower or "conservative" in text_lower:
                 entities["treatment_history"] = "Documented Conservative Management"
-            return entities
+            return validate_clinical_entities(entities)
 
         try:
             client = OpenAI(api_key=self.api_key, base_url=self.base_url)
@@ -69,13 +93,17 @@ class LLMClinicalExtractor:
                 temperature=0.0,
                 response_format={"type": "json_object"},
             )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            return {
-                "diagnosis": f"Extraction Error: {str(e)}",
-                "treatment_history": "Unknown",
-                "procedure_request": "Unknown",
-            }
+            choice = response.choices[0]
+            if choice.finish_reason != "stop" or getattr(
+                choice.message, "refusal", None
+            ):
+                raise ExtractionError("Clinical extraction did not complete.")
+            return validate_clinical_entities(json.loads(choice.message.content))
+        except Exception:
+            # Provider errors may contain note text or credentials. Never display them.
+            raise ExtractionError(
+                "Clinical extraction failed validation or completion."
+            ) from None
 
 
 # --- 2. Advanced Multi-Policy RAG Retriever ---
@@ -107,6 +135,7 @@ class ClinicalPolicyRetriever:
 # --- 3. Authorization Risk Model ---
 class AuthorizationRiskModel:
     def predict_risk(self, clinical_entities: Dict[str, str]) -> Dict[str, Any]:
+        clinical_entities = validate_clinical_entities(clinical_entities)
         risk_score = 20
         history = clinical_entities.get("treatment_history", "").lower()
         procedure = clinical_entities.get("procedure_request", "").lower()
@@ -149,6 +178,7 @@ def extract_text_from_pdf(uploaded_file) -> str:
 
 # --- 4. HL7 FHIR Exporter Utility ---
 def generate_fhir_bundle(entities: dict, prediction: dict, policy: str) -> dict:
+    entities = validate_clinical_entities(entities)
     return {
         "resourceType": "Bundle",
         "type": "collection",
@@ -226,7 +256,10 @@ def main():
         )
 
     nlp = LLMClinicalExtractor(
-        api_key=api_key, base_url=base_url, model_name=model_name
+        api_key=api_key,
+        base_url=base_url,
+        model_name=model_name,
+        require_provider=provider != "Fallback (Rule-Based)",
     )
     rag = ClinicalPolicyRetriever()
     ml = AuthorizationRiskModel()
@@ -274,7 +307,17 @@ def main():
                 with st.spinner(
                     "Running AI analysis, policy grounding, and logging compliance trail..."
                 ):
-                    entities = nlp.extract(clinical_note)
+                    try:
+                        entities = validate_clinical_entities(
+                            nlp.extract(clinical_note)
+                        )
+                    except ExtractionError:
+                        st.error(
+                            "Human review required: clinical extraction failed or "
+                            "returned incomplete information. Authorization scoring "
+                            "and export are unavailable for this case."
+                        )
+                        return
                     policy = rag.search_policies(entities["diagnosis"])
                     prediction = ml.predict_risk(entities)
 
